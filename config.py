@@ -136,24 +136,24 @@ def validate_config() -> bool:
 
 
 # ─── Config values (accessed as module-level constants) ──────────────────────
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_ALLOWED_USERS: list[str] = [
     u.strip() for u in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",") if u.strip()
 ]
 
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "").strip()
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "").strip()
 
-HEYGEN_API_KEY: str = os.getenv("HEYGEN_API_KEY", "")
-HEYGEN_DEFAULT_AVATAR_ID: str = os.getenv("HEYGEN_DEFAULT_AVATAR_ID", "")
-HEYGEN_DEFAULT_VOICE_ID: str = os.getenv("HEYGEN_DEFAULT_VOICE_ID", "")
+HEYGEN_API_KEY: str = os.getenv("HEYGEN_API_KEY", "").strip()
+HEYGEN_DEFAULT_AVATAR_ID: str = os.getenv("HEYGEN_DEFAULT_AVATAR_ID", "").strip()
+HEYGEN_DEFAULT_VOICE_ID: str = os.getenv("HEYGEN_DEFAULT_VOICE_ID", "").strip()
 
-PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
-TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "").strip()
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "").strip()
 
-GOOGLE_CREDENTIALS_PATH: str = os.getenv("GOOGLE_CREDENTIALS_PATH", "google_credentials.json")
-GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
-GOOGLE_SHEET_ID: str = os.getenv("GOOGLE_SHEET_ID", "")
+GOOGLE_CREDENTIALS_PATH: str = os.getenv("GOOGLE_CREDENTIALS_PATH", "google_credentials.json").strip()
+GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+GOOGLE_SHEET_ID: str = os.getenv("GOOGLE_SHEET_ID", "").strip()
 
 # ── Cloud deployment: write credentials from env var if file doesn't exist ────
 # On Railway/Render/etc. you can't upload files, so paste the entire
