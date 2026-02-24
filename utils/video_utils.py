@@ -19,15 +19,16 @@ from utils.logger import logger
 
 def run_ffmpeg(args: list[str], description: str = "") -> subprocess.CompletedProcess:
     """Run ffmpeg with the given arguments. Raises on non-zero exit."""
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"] + args
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"] + args
     if description:
         logger.info(f"FFmpeg: {description}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        error_output = result.stderr or result.stdout or "no output"
         logger.error(f"FFmpeg failed (exit={result.returncode}) cmd: {' '.join(cmd)}")
-        for line in (result.stderr or result.stdout or "no output").splitlines():
+        for line in error_output.splitlines():
             logger.error(f"  ffmpeg> {line}")
-        raise RuntimeError(f"FFmpeg error: {result.stderr or result.stdout or 'no output'}")
+        raise RuntimeError(f"FFmpeg error (exit={result.returncode}): {error_output}")
     return result
 
 
@@ -160,60 +161,65 @@ def overlay_broll_segments(
 ) -> Path:
     """
     Overlays B-roll clips on top of the avatar video at specified timestamps.
+    Processes one clip at a time so a bad clip doesn't fail the whole edit.
     Each broll_clip dict: {"path": str, "start": float, "end": float}
     """
     output_path = Path(output_path)
 
     if not broll_clips:
-        # No B-roll, just copy
         run_ffmpeg(
             ["-i", str(avatar_path), "-c", "copy", str(output_path)],
             description="No B-roll to overlay, copying",
         )
         return output_path
 
-    # Build complex filter graph
-    inputs = ["-i", str(avatar_path)]
-    for clip in broll_clips:
-        inputs += ["-i", str(clip["path"])]
+    current = Path(avatar_path)
+    prev_tmp: Optional[Path] = None
 
-    filter_parts = []
-    # Scale avatar as base
-    filter_parts.append(f"[0:v]scale={width}:{height},setpts=PTS-STARTPTS[base]")
-
-    prev = "[base]"
     for i, clip in enumerate(broll_clips):
-        idx = i + 1
-        scaled = f"[broll{idx}]"
-        overlay = f"[v{idx}]"
         start = clip["start"]
         end = clip["end"]
-        # Scale and crop broll to fill screen
-        filter_parts.append(
-            f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setpts=PTS-STARTPTS{scaled}"
+        clip_path = str(clip["path"])
+        is_last = (i == len(broll_clips) - 1)
+        dest = output_path if is_last else output_path.parent / f"_broll_tmp_{i}.mp4"
+
+        filter_complex = (
+            f"[0:v]scale={width}:{height},setpts=PTS-STARTPTS[base];"
+            f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setpts=PTS-STARTPTS,format=yuv420p[broll];"
+            f"[base][broll]overlay=0:0:enable='between(t,{start:.2f},{end:.2f})'[outv]"
         )
-        filter_parts.append(
-            f"{prev}{scaled}overlay=0:0:enable='between(t,{start:.2f},{end:.2f})'{overlay}"
-        )
-        prev = overlay
 
-    filter_parts[-1] = filter_parts[-1].rsplit(f"[v{len(broll_clips)}]", 1)[0] + "[outv]"
+        try:
+            run_ffmpeg(
+                [
+                    "-i", str(current),
+                    "-i", clip_path,
+                    "-filter_complex", filter_complex,
+                    "-map", "[outv]",
+                    "-map", "0:a?",
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-preset", "fast",
+                    str(dest),
+                ],
+                description=f"Overlaying B-roll {i+1}/{len(broll_clips)} (t={start:.1f}s–{end:.1f}s)",
+            )
+        except Exception as e:
+            logger.warning(f"B-roll clip {i+1} failed ({e}), skipping it")
+            # Skip this clip: just copy current to dest so the chain continues
+            run_ffmpeg(
+                ["-i", str(current), "-c", "copy", str(dest)],
+                description=f"Copying (skipped B-roll {i+1})",
+            )
 
-    filter_complex = ";".join(filter_parts)
+        # Clean up the previous temp file now that it's no longer needed
+        if prev_tmp and prev_tmp.exists():
+            prev_tmp.unlink(missing_ok=True)
 
-    run_ffmpeg(
-        inputs + [
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", "0:a",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-preset", "fast",
-            str(output_path),
-        ],
-        description=f"Overlaying {len(broll_clips)} B-roll segment(s)",
-    )
+        prev_tmp = dest if not is_last else None
+        current = dest
+
     return output_path
 
 
