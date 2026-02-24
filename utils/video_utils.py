@@ -24,8 +24,10 @@ def run_ffmpeg(args: list[str], description: str = "") -> subprocess.CompletedPr
         logger.info(f"FFmpeg: {description}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        logger.error(f"FFmpeg failed: {result.stderr}")
-        raise RuntimeError(f"FFmpeg error: {result.stderr}")
+        logger.error(f"FFmpeg failed (exit={result.returncode}) cmd: {' '.join(cmd)}")
+        for line in (result.stderr or result.stdout or "no output").splitlines():
+            logger.error(f"  ffmpeg> {line}")
+        raise RuntimeError(f"FFmpeg error: {result.stderr or result.stdout or 'no output'}")
     return result
 
 
@@ -110,7 +112,16 @@ def scale_to_portrait(input_path: str | Path, output_path: str | Path,
         f"crop={width}:{height}"
     )
     run_ffmpeg(
-        ["-i", str(input_path), "-vf", filter_str, "-c:a", "copy", str(output_path)],
+        [
+            "-i", str(input_path),
+            "-vf", filter_str,
+            "-map", "0:v",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-preset", "fast",
+            str(output_path),
+        ],
         description=f"Scaling {Path(input_path).name} to {width}x{height}",
     )
     return output_path

@@ -1,13 +1,12 @@
 """Structured logger used across all agents."""
 import logging
 import sys
-from rich.logging import RichHandler
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)],
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 logger = logging.getLogger("ai_ad_creator")
