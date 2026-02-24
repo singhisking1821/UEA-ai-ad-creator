@@ -52,13 +52,6 @@ REQUIRED_KEYS: list[dict] = [
         "required": True,
     },
     {
-        "key": "GOOGLE_CREDENTIALS_PATH",
-        "label": "Google Service Account credentials JSON path",
-        "hint": "See README for how to create this. Default: google_credentials.json",
-        "required": True,
-        "default": "google_credentials.json",
-    },
-    {
         "key": "GOOGLE_DRIVE_FOLDER_ID",
         "label": "Google Drive Folder ID for video uploads",
         "hint": "Right-click folder in Drive → Get link → copy ID after /folders/",
@@ -73,6 +66,13 @@ REQUIRED_KEYS: list[dict] = [
 ]
 
 OPTIONAL_KEYS: list[dict] = [
+    {
+        "key": "GOOGLE_CREDENTIALS_PATH",
+        "label": "Google Service Account credentials JSON path",
+        "hint": "Only needed if not using GOOGLE_CREDENTIALS_JSON. Default: google_credentials.json",
+        "required": False,
+        "default": "google_credentials.json",
+    },
     {
         "key": "TELEGRAM_ALLOWED_USERS",
         "label": "Allowed Telegram user IDs (comma-separated, blank = anyone)",
