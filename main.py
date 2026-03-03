@@ -79,6 +79,16 @@ async def main() -> None:
         run_setup_wizard()
         return
 
+    import config as cfg
+
+    # ── Start webhook server FIRST (Railway healthcheck requires this) ─────────
+    # Must bind before API key validation so /health always responds.
+    # If keys are missing, the service stays alive (healthcheck green) while
+    # the operator adds the missing variables in Railway → Variables.
+    from services.webhook_server import start_webhook_server
+    asyncio.create_task(start_webhook_server(host="0.0.0.0", port=cfg.WEBHOOK_PORT))
+    await asyncio.sleep(0.1)  # yield so the server can bind to the port
+
     # ── Check FFmpeg (needed only for the generic pipeline, not USAEA) ─────────
     if not check_ffmpeg():
         console.print(
@@ -89,12 +99,13 @@ async def main() -> None:
         # Don't exit — USAEA pipeline works without FFmpeg
 
     # ── Check API keys ────────────────────────────────────────────────────────
-    import config as cfg
     if not check_and_report_missing_keys(cfg):
-        sys.exit(1)
-
-    # ── Start webhook server ──────────────────────────────────────────────────
-    from services.webhook_server import start_webhook_server
+        # Do NOT sys.exit — keep the event loop alive so /health stays green.
+        # Railway will show the service as healthy; check the logs for which
+        # variables are missing and add them in Railway → Variables.
+        console.print("[red]Bot will not start until all missing variables are added.[/red]")
+        await asyncio.Event().wait()
+        return
 
     console.print(
         "[bold green]🚀 AI Ad Creator starting...[/bold green]\n"
@@ -115,11 +126,6 @@ async def main() -> None:
 
     async with app:
         await set_bot_commands(app)
-
-        # Start webhook server as a background task in the same event loop
-        asyncio.create_task(
-            start_webhook_server(host="0.0.0.0", port=cfg.WEBHOOK_PORT)
-        )
 
         console.print("[green]✅ Bot is running. Send a message on Telegram to start![/green]")
         await app.start()
