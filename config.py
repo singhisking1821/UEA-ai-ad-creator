@@ -63,6 +63,12 @@ REQUIRED_KEYS: list[dict] = [
         "hint": "From sheet URL: docs.google.com/spreadsheets/d/{THIS_PART}/",
         "required": True,
     },
+    {
+        "key": "REVID_API_KEY",
+        "label": "Revid.ai API Key (B-roll + captions + final render)",
+        "hint": "Get from your Revid.ai account settings → API",
+        "required": True,
+    },
 ]
 
 OPTIONAL_KEYS: list[dict] = [
@@ -91,6 +97,20 @@ OPTIONAL_KEYS: list[dict] = [
         "label": "HeyGen default voice ID (blank = auto-select)",
         "required": False,
         "default": "",
+    },
+    {
+        "key": "HEYGEN_WEBHOOK_URL",
+        "label": "Public URL for HeyGen webhook callbacks (blank = use polling)",
+        "hint": "e.g. https://your-app.up.railway.app/webhook/heygen — register this in HeyGen dashboard",
+        "required": False,
+        "default": "",
+    },
+    {
+        "key": "WEBHOOK_PORT",
+        "label": "Port for the webhook HTTP server (default: 8080)",
+        "hint": "Railway sets PORT automatically — leave blank to use Railway's PORT env var",
+        "required": False,
+        "default": "8080",
     },
 ]
 
@@ -151,6 +171,15 @@ HEYGEN_DEFAULT_VOICE_ID: str = os.getenv("HEYGEN_DEFAULT_VOICE_ID", "").strip()
 PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "").strip()
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "").strip()
 
+REVID_API_KEY: str = os.getenv("REVID_API_KEY", "").strip()
+
+# HEYGEN_WEBHOOK_URL: set to your Railway public URL + /webhook/heygen
+# Leave blank to fall back to polling (simpler but less efficient)
+HEYGEN_WEBHOOK_URL: str = os.getenv("HEYGEN_WEBHOOK_URL", "").strip()
+
+# Port for the aiohttp webhook server. Railway sets PORT automatically.
+WEBHOOK_PORT: int = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
+
 GOOGLE_CREDENTIALS_PATH: str = os.getenv("GOOGLE_CREDENTIALS_PATH", "google_credentials.json").strip()
 GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 GOOGLE_SHEET_ID: str = os.getenv("GOOGLE_SHEET_ID", "").strip()
@@ -174,13 +203,21 @@ VIDEO_HEIGHT: int = int(os.getenv("VIDEO_HEIGHT", "1920"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Claude model to use for all agents
-CLAUDE_MODEL: str = "claude-opus-4-6"
+# Claude model — Sonnet 4.6 for USAEA pipeline (spec requirement),
+# also used as the default for generic pipeline agents
+CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
-# Ad script settings
-DEFAULT_AD_DURATION_SECONDS: int = 45  # Target length per ad
+# Generic pipeline: ad script settings (not used by USAEA pipeline)
+DEFAULT_AD_DURATION_SECONDS: int = 45
 DISCLAIMER_DURATION_SECONDS: int = 5
 DISCLAIMER_TEXT: str = (
     "Results may vary. This is not financial advice. "
     "Individual results depend on personal circumstances."
+)
+
+# USAEA pipeline: 20-second hard ceiling (3s hook + 10s body + 4s CTA + 3s disclaimer)
+USAEA_SPOKEN_DURATION_SECONDS: int = 17   # Hook + Body + CTA (no disclaimer voiceover)
+USAEA_TOTAL_DURATION_SECONDS: int = 20    # Full video including on-screen disclaimer
+USAEA_DISCLAIMER_TEXT: str = (
+    "Results may vary. Past results do not guarantee future outcomes. Not legal advice."
 )

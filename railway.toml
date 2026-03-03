@@ -1,0 +1,12 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# aiohttp webhook server on PORT, health check confirms it's alive
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+
+# Restart on failure (e.g. OOM during video processing)
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

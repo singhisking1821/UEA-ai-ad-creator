@@ -79,35 +79,48 @@ async def main() -> None:
         run_setup_wizard()
         return
 
-    # ── Check FFmpeg ──────────────────────────────────────────────────────────
+    # ── Check FFmpeg (needed only for the generic pipeline, not USAEA) ─────────
     if not check_ffmpeg():
         console.print(
-            "[red]❌ FFmpeg not found![/red]\n"
-            "Install it:\n"
-            "  macOS:  brew install ffmpeg\n"
-            "  Ubuntu: sudo apt install ffmpeg\n"
-            "  Docker: already included in the Dockerfile"
+            "[yellow]⚠️  FFmpeg not found — generic ad pipeline will fail, "
+            "but the USAEA pipeline (Revid.ai) does not need it.[/yellow]\n"
+            "To install: macOS: brew install ffmpeg | Ubuntu: sudo apt install ffmpeg"
         )
-        sys.exit(1)
+        # Don't exit — USAEA pipeline works without FFmpeg
 
     # ── Check API keys ────────────────────────────────────────────────────────
     import config as cfg
     if not check_and_report_missing_keys(cfg):
         sys.exit(1)
 
-    # ── Start Telegram Bot ────────────────────────────────────────────────────
-    from bot.telegram_bot import build_application, set_bot_commands
+    # ── Start webhook server ──────────────────────────────────────────────────
+    from services.webhook_server import start_webhook_server
 
     console.print(
         "[bold green]🚀 AI Ad Creator starting...[/bold green]\n"
-        f"Model: [cyan]{cfg.CLAUDE_MODEL}[/cyan]\n"
-        f"Output dir: [cyan]{cfg.OUTPUT_DIR}[/cyan]\n"
+        f"Model:       [cyan]{cfg.CLAUDE_MODEL}[/cyan]\n"
+        f"Output dir:  [cyan]{cfg.OUTPUT_DIR}[/cyan]\n"
+        f"Webhook port:[cyan]{cfg.WEBHOOK_PORT}[/cyan]\n"
+        + (
+            f"HeyGen webhook URL: [cyan]{cfg.HEYGEN_WEBHOOK_URL}[/cyan]\n"
+            if cfg.HEYGEN_WEBHOOK_URL
+            else "[yellow]HEYGEN_WEBHOOK_URL not set — will use polling fallback[/yellow]\n"
+        )
     )
+
+    # ── Start Telegram Bot ────────────────────────────────────────────────────
+    from bot.telegram_bot import build_application, set_bot_commands
 
     app = build_application()
 
     async with app:
         await set_bot_commands(app)
+
+        # Start webhook server as a background task in the same event loop
+        asyncio.create_task(
+            start_webhook_server(host="0.0.0.0", port=cfg.WEBHOOK_PORT)
+        )
+
         console.print("[green]✅ Bot is running. Send a message on Telegram to start![/green]")
         await app.start()
         await app.updater.start_polling(allowed_updates=["message"])

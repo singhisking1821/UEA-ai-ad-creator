@@ -1,12 +1,15 @@
 """
 Orchestrator Agent: the brain of the system.
 
-Coordinates the full pipeline:
-  1. Research  →  2. Script Writing  →  3. Avatar Video Generation
-  →  4. B-roll Fetching  →  5. Video Editing  →  6. QC  →  7. Upload
-  →  8. Report back to user via Telegram
+Routes incoming requests to either:
+  - USAEA pipeline (for "create two ads for US employee advocates" triggers)
+  - Generic pipeline (for "Create N ads for website.com" triggers)
 
-Receives a job dict, runs everything, and returns a results dict.
+USAEA pipeline (VideoToolAgent_SystemPrompt_v3.pdf):
+  Claude Scripting Agent → HeyGen → Revid.ai Prompt Agent → Revid.ai → Drive
+
+Generic pipeline:
+  Research → Script Writing → Avatar Video → B-roll → FFmpeg Edit → QC → Drive
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from typing import Callable, Optional
 import config
 from agents import researcher, script_writer, video_generator, broll_agent, video_editor
 from agents import quality_checker, uploader
+from agents.usaea_orchestrator import is_usaea_trigger, run_usaea_job, USAEAJob
 from utils.logger import logger
 
 
@@ -52,14 +56,26 @@ class JobResult:
 def parse_request(text: str) -> Optional[AdJob]:
     """
     Parses a natural language Telegram message into an AdJob.
-    Examples:
-      "Create 5 ads for usaemployeeadvocates.com"
-      "Make 3 talking head ads for mysite.com"
-      "Generate 2 full broll ads for example.com"
+
+    USAEA triggers (e.g. "create two ads for US employee advocates") are
+    detected first and returned as AdJob(ad_type="usaea", num_ads=2).
+    The generic pipeline handles all other website-based ad requests.
+
     Returns None if the message isn't a valid ad creation request.
     """
     text_lower = text.lower().strip()
 
+    # ── USAEA trigger (highest priority) ──────────────────────────────────────
+    if is_usaea_trigger(text):
+        import uuid
+        return AdJob(
+            job_id=str(uuid.uuid4())[:8],
+            website="usaemployeeadvocates.com",
+            num_ads=2,
+            ad_type="usaea",
+        )
+
+    # ── Generic pipeline ──────────────────────────────────────────────────────
     # Check for trigger words
     if not any(w in text_lower for w in ["create", "make", "generate", "build"]):
         return None
@@ -108,9 +124,30 @@ async def run_job(
     progress_cb: Optional[Callable[[str], None]] = None,
 ) -> JobResult:
     """
-    Executes the full ad creation pipeline for a job.
+    Executes the ad creation pipeline for a job.
+
+    - USAEA jobs (ad_type="usaea") are routed to the USAEA pipeline.
+    - All other jobs go through the generic research → script → HeyGen → FFmpeg pipeline.
+
     progress_cb is called with status update strings throughout.
     """
+    # ── Route USAEA jobs ──────────────────────────────────────────────────────
+    if job.ad_type == "usaea":
+        usaea_job = USAEAJob(job_id=job.job_id)
+        usaea_result = await run_usaea_job(usaea_job, progress_cb=progress_cb)
+        # Wrap into a JobResult so the Telegram bot handler stays unchanged
+        jr = JobResult(
+            job_id=job.job_id,
+            website=job.website,
+            num_requested=2,
+            num_completed=len(usaea_result.drive_links),
+            drive_links=usaea_result.drive_links,
+            errors=usaea_result.errors,
+            duration_seconds=usaea_result.duration_seconds,
+        )
+        return jr
+
+    # ── Generic pipeline ──────────────────────────────────────────────────────
     start_time = time.time()
     result = JobResult(
         job_id=job.job_id,

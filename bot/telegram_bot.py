@@ -64,19 +64,23 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         "👋 *AI Ad Creator Bot*\n\n"
-        "I create fully-edited Facebook video ads using AI avatars, B-roll, and subtitles.\n\n"
-        "*To create ads, just message me:*\n"
-        "`Create 5 ads for usaemployeeadvocates.com`\n"
-        "`Make 3 talking head ads for mysite.com`\n"
-        "`Generate 2 full broll ads for example.com`\n\n"
-        "*Options:*\n"
-        "• `full broll` (default) — Avatar full screen with B-roll overlaid\n"
-        "• `talking head` — Avatar at bottom, B-roll background\n\n"
-        "*Other commands:*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "*USAEA Campaign (Wrongful Termination)*\n"
+        "Send any of these to generate 2 unique 20-second ads:\n"
+        "`create two ads for US employee advocates`\n"
+        "`make two ads for USAEA`\n"
+        "`generate ads for employee advocates`\n\n"
+        "_Pipeline: Claude Sonnet 4.6 → HeyGen → Revid.ai → Google Drive_\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "*Generic Ad Creator*\n"
+        "`Create 5 ads for mysite.com`\n"
+        "`Make 3 talking head ads for mysite.com`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "*Commands:*\n"
         "/avatars — List available HeyGen avatars\n"
         "/status — Show running jobs\n"
         "/help — Show this message\n\n"
-        "_Ads are uploaded to Google Drive and logged to your Google Sheet._",
+        "_All ads uploaded to Google Drive and logged to Google Sheets._",
         parse_mode=ParseMode.MARKDOWN,
     )
 
