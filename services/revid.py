@@ -1,15 +1,13 @@
 """
-Revid.ai API client.
+Revid.ai API client — V3 (fixed).
 
-Revid.ai is an AI-powered video editing and creation platform.
-This client sends edit prompts to Revid.ai and polls for the resulting video.
+Root cause of ConnectError: The old base URL https://api.revid.ai does not resolve.
+The Revid Public API v3 uses https://www.revid.ai as the base, with REST endpoints
+under /api/v3/. Auth is via the header "x-api-key" (NOT "Authorization: Bearer").
 
-⚠️  IMPORTANT — Before deploying, verify the following against your Revid.ai API docs:
-    1. REVID_BASE URL (currently https://api.revid.ai — confirm with Revid.ai support)
-    2. Endpoint paths: /v1/video/create and /v1/video/{job_id}/status
-    3. Request payload structure (the "prompt" field key)
-    4. Response field names for job_id, status, and video_url
-    Contact Revid.ai support or check their API documentation for exact details.
+References:
+    - Revid Public API v3 Postman collection: https://documenter.getpostman.com/view/36975521/2sBXcGEfaB
+    - Get your API key at: https://www.revid.ai/account
 
 Environment variables required:
     REVID_API_KEY — Your Revid.ai API key (set in Railway Variables or .env)
@@ -26,69 +24,62 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import config
 from utils.logger import logger
 
-# ⚠️  Confirm this base URL with Revid.ai. It may be https://api.revid.ai/v1 or similar.
-REVID_BASE = "https://api.revid.ai"
+# ✅ FIXED: Correct V3 base URL (the old https://api.revid.ai does not exist)
+REVID_BASE = "https://www.revid.ai"
 
 
 class RevidClient:
     """
-    Revid.ai API client.
+    Revid.ai API v3 client.
 
     Typical usage:
         client = RevidClient()
-        path = await client.create_and_download(revid_prompt, output_path)
-
-    Or step by step:
-        job_id   = await client.create_video(revid_prompt)
-        video_url = await client.poll_until_complete(job_id)
-        path     = await client.download_video(video_url, output_path)
+        path = await client.create_and_download(script_text, output_path)
     """
 
     def __init__(self, api_key: str = ""):
         self.api_key = api_key or config.REVID_API_KEY
         self.headers = {
-            # ⚠️  Revid.ai may use "X-Api-Key" instead of "Authorization: Bearer".
-            # Check their API docs and adjust if needed.
-            "Authorization": f"Bearer {self.api_key}",
+            # ✅ FIXED: V3 uses "x-api-key" header, NOT "Authorization: Bearer"
+            "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=30))
-    async def create_video(self, revid_prompt: str) -> str:
+    async def create_video(self, script: str) -> str:
         """
-        Submits a video edit job to Revid.ai.
-        Returns the job_id string.
+        Submits a video creation job to Revid.ai V3.
+        Returns the video/job id string.
 
-        ⚠️  Endpoint: POST /v1/video/create
-            Adjust the path and payload keys to match Revid.ai's actual API contract.
+        V3 endpoint: POST /api/v3/videos
+        Payload key: "inputText" (the script/prompt for the video)
         """
-        # ⚠️  Adjust payload keys to match what Revid.ai expects.
         payload = {
-            "prompt": revid_prompt,
-            # Additional fields Revid.ai may require, e.g.:
-            # "template_id": "employment_law",
-            # "output_format": "mp4",
+            "inputText": script,
+            # Optional V3 fields you can add as needed:
+            # "ratio": "9:16",           # portrait for Facebook/Instagram
+            # "mediaType": "stockVideo", # or "aiVideo", "aiImage"
+            # "language": "English",
         }
 
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"{REVID_BASE}/v1/video/create",   # ⚠️ Verify endpoint path
+                f"{REVID_BASE}/api/v3/videos",
                 headers=self.headers,
                 json=payload,
             )
             resp.raise_for_status()
             data = resp.json()
 
-        # ⚠️  Adjust key path to match Revid.ai's actual response structure.
+        # V3 response: { "id": "...", ... }  (top-level "id" field)
         job_id = (
-            data.get("job_id")
-            or data.get("id")
-            or data.get("data", {}).get("job_id")
+            data.get("id")
+            or data.get("videoId")
             or data.get("data", {}).get("id")
         )
         if not job_id:
             raise RuntimeError(
-                f"Revid.ai did not return a job_id. Full response: {data}"
+                f"Revid.ai did not return a job id. Full response: {data}"
             )
 
         logger.info(f"Revid.ai job submitted: {job_id}")
@@ -96,14 +87,13 @@ class RevidClient:
 
     async def get_video_status(self, job_id: str) -> dict:
         """
-        Returns the current status dict for a Revid.ai job.
+        Returns the current status dict for a Revid.ai V3 job.
 
-        ⚠️  Endpoint: GET /v1/video/{job_id}/status
-            Adjust to match Revid.ai's actual polling endpoint path.
+        V3 endpoint: GET /api/v3/videos/{id}
         """
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                f"{REVID_BASE}/v1/video/{job_id}/status",   # ⚠️ Verify endpoint path
+                f"{REVID_BASE}/api/v3/videos/{job_id}",
                 headers=self.headers,
             )
             resp.raise_for_status()
@@ -113,21 +103,20 @@ class RevidClient:
         self,
         job_id: str,
         poll_interval: int = 20,
-        max_wait_seconds: int = 600,  # 10 minutes
+        max_wait_seconds: int = 600,
     ) -> str:
         """
         Polls Revid.ai until the video job is complete.
         Returns the video download URL.
 
-        ⚠️  Adjust the status values and response field names to match Revid.ai's API.
-            Common patterns for status: "completed" / "done" / "finished" / "success"
-            Common patterns for URL key: "video_url" / "output_url" / "url" / "download_url"
+        V3 status values: "pending" | "processing" | "completed" | "failed"
+        V3 video URL field: "outputUrl"
         """
         start = time.time()
         while time.time() - start < max_wait_seconds:
             data = await self.get_video_status(job_id)
 
-            # ⚠️  Adjust field names to match Revid.ai's response structure
+            # V3 status is at top-level "status" field
             status = (
                 data.get("status")
                 or data.get("data", {}).get("status")
@@ -137,16 +126,15 @@ class RevidClient:
             logger.info(f"Revid.ai job {job_id}: status={status!r}")
 
             if status in ("completed", "done", "finished", "success"):
-                # ⚠️  Adjust field name for the download URL
+                # V3 video URL field is "outputUrl"
                 video_url = (
-                    data.get("video_url")
+                    data.get("outputUrl")
                     or data.get("output_url")
+                    or data.get("videoUrl")
+                    or data.get("video_url")
                     or data.get("url")
-                    or data.get("download_url")
-                    or data.get("data", {}).get("video_url")
-                    or data.get("data", {}).get("output_url")
-                    or data.get("data", {}).get("url")
-                    or data.get("data", {}).get("download_url")
+                    or data.get("data", {}).get("outputUrl")
+                    or data.get("data", {}).get("videoUrl")
                 )
                 if not video_url:
                     raise RuntimeError(
@@ -168,8 +156,7 @@ class RevidClient:
             await asyncio.sleep(poll_interval)
 
         raise TimeoutError(
-            f"Revid.ai job {job_id} did not complete within {max_wait_seconds}s. "
-            "Increase REVID_MAX_WAIT_SECONDS or check your Revid.ai account."
+            f"Revid.ai job {job_id} did not complete within {max_wait_seconds}s."
         )
 
     async def download_video(self, url: str, output_path: str | Path) -> Path:
@@ -189,13 +176,13 @@ class RevidClient:
 
     async def create_and_download(
         self,
-        revid_prompt: str,
+        script: str,
         output_path: str | Path,
     ) -> Path:
         """
-        End-to-end: submit prompt → poll until complete → download .mp4.
+        End-to-end: submit script → poll until complete → download .mp4.
         Returns local path to the downloaded video.
         """
-        job_id = await self.create_video(revid_prompt)
+        job_id = await self.create_video(script)
         video_url = await self.poll_until_complete(job_id)
         return await self.download_video(video_url, output_path)
