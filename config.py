@@ -5,7 +5,6 @@ On first run, missing keys are prompted interactively.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv, set_key
 
@@ -167,6 +166,49 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "").strip()
 HEYGEN_API_KEY: str = os.getenv("HEYGEN_API_KEY", "").strip()
 HEYGEN_DEFAULT_AVATAR_ID: str = os.getenv("HEYGEN_DEFAULT_AVATAR_ID", "").strip()
 HEYGEN_DEFAULT_VOICE_ID: str = os.getenv("HEYGEN_DEFAULT_VOICE_ID", "").strip()
+
+
+def _parse_avatar_pool() -> list[dict]:
+    """
+    Reads HEYGEN_AVATAR_N_ID / _GENDER / _DESCRIPTION env vars (N = 1..5).
+    Returns a list of avatar config dicts.  Empty list if none are configured.
+    """
+    pool = []
+    for i in range(1, 6):
+        aid = os.getenv(f"HEYGEN_AVATAR_{i}_ID", "").strip()
+        if not aid:
+            continue
+        pool.append({
+            "index": i,
+            "avatar_id": aid,
+            "look_id": os.getenv(f"HEYGEN_AVATAR_{i}_LOOK_ID", "").strip(),
+            "gender": os.getenv(f"HEYGEN_AVATAR_{i}_GENDER", "").strip().lower(),
+            "description": os.getenv(f"HEYGEN_AVATAR_{i}_DESCRIPTION", f"Avatar {i}").strip(),
+        })
+    return pool
+
+
+def _parse_voice_pool() -> list[dict]:
+    """
+    Reads HEYGEN_VOICE_N_ID / _GENDER / _DESCRIPTION env vars (N = 1..5).
+    Returns a list of voice config dicts.  Empty list if none are configured.
+    """
+    pool = []
+    for i in range(1, 6):
+        vid = os.getenv(f"HEYGEN_VOICE_{i}_ID", "").strip()
+        if not vid:
+            continue
+        pool.append({
+            "index": i,
+            "voice_id": vid,
+            "gender": os.getenv(f"HEYGEN_VOICE_{i}_GENDER", "").strip().lower(),
+            "description": os.getenv(f"HEYGEN_VOICE_{i}_DESCRIPTION", f"Voice {i}").strip(),
+        })
+    return pool
+
+
+HEYGEN_AVATAR_POOL: list[dict] = _parse_avatar_pool()
+HEYGEN_VOICE_POOL: list[dict] = _parse_voice_pool()
 
 PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "").strip()
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "").strip()

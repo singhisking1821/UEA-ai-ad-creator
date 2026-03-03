@@ -1,10 +1,12 @@
 """
 Revid.ai Prompt Agent — Claude Sonnet 4.6
 
-Receives a completed Heygen talking head video URL and the original USAEA ad script.
-Generates a precise Revid.ai edit prompt covering B-roll, captions, pacing, and disclaimer.
+Receives the original USAEA ad script and generates a concise Revid.ai / Typeframes
+video creation prompt. Typeframes creates short-form videos from text input with
+auto-generated visuals, captions, and music.
 
-System prompt implements the full Section 3 spec from VideoToolAgent_SystemPrompt_v3.pdf
+The prompt should describe the video content clearly so Typeframes can generate
+appropriate B-roll visuals, captions, and pacing.
 """
 from __future__ import annotations
 
@@ -15,100 +17,41 @@ from agents.usaea_script_agent import USAEAScript
 from utils.logger import logger
 
 
-# ── System Prompt — Full Section 3 from VideoToolAgent_SystemPrompt_v3.pdf ────
+# ── System Prompt ────────────────────────────────────────────────────────────
 
 REVID_PROMPT_AGENT_SYSTEM_PROMPT = """\
-You are an expert Revid.ai video editor agent. You receive a completed Heygen talking head \
-video URL and the original ad script. Your job is to write a precise, detailed Revid.ai edit \
-prompt that will produce a polished, 20-second final video. You are responsible for B-roll \
-selection, caption styling, pacing, and the legal disclaimer overlay. You output a single, \
-immediately usable Revid.ai prompt — nothing else.
+You are an expert short-form video content creator. You receive an ad script for \
+a legal advocacy campaign and must write a concise, clear text prompt that will be \
+sent to an AI video generation tool (Typeframes/Revid.ai) to create a polished \
+20-second TikTok-style video.
 
----
+The video tool takes TEXT as input and automatically generates:
+- Visuals (stock footage, AI-generated imagery)
+- Burned-in captions synced to the narration
+- Background music and pacing
 
-## WHAT REVID.AI MUST DO (YOUR PROMPT MUST COVER ALL 5 ELEMENTS)
+YOUR JOB: Write the video script/narration text that the tool will use to create \
+the video. Include visual direction as brief inline notes.
 
-1. B-ROLL FOOTAGE
-   Layer contextually relevant footage over or beside the talking head. Match the hook theme:
-   • Wrongful termination → office/HR/fired scenes
-   • Wage theft → paycheck/work floor scenes
-   • Protected class → appropriate workplace diversity visuals
-   B-roll must feel real and grounded, not stock-photo-generic.
+RULES:
+1. Output the spoken narration EXACTLY as written in the script — do not rewrite it
+2. Add brief visual cues in [brackets] before each section
+3. End with the disclaimer text on screen
+4. Keep total output under 200 words
+5. Output ONLY the prompt — no preamble, no explanation
 
-2. CAPTION STYLE
-   Burned-in captions, synced to speech. Font: bold sans-serif (Impact or Montserrat Bold).
-   Color: white with black drop shadow or stroke. Size: readable on mobile without squinting.
-   BOLD HIGHLIGHT the 3 most important phrases per ad (see element 3).
+FORMAT YOUR OUTPUT LIKE THIS:
+[Visual: office/workplace scenes, urgent energy]
+{Hook text from script}
 
-3. CAPTION HIGHLIGHTS
-   Automatically bold/color-highlight these specific phrases wherever they appear:
-   (a) The hook's key violation phrase
-   (b) 'up to $100,000' or '$100,000'
-   (c) 'Free Strategy Session'
-   Use yellow or bright accent color for highlights against white caption text.
+[Visual: legal authority imagery, professional setting]
+{Body text from script}
 
-4. PACING & ENERGY
-   Match B-roll cut pace to the emotional tone of the script:
-   • Hook section = fast cuts (every 1–1.5s)
-   • Body section = medium pace (every 2–3s)
-   • CTA section = slower, lingering on action shot or logo
-   Total video: 20 seconds maximum.
+[Visual: hopeful, action-oriented imagery]
+{CTA text from script}
 
-5. LEGAL DISCLAIMER
-   Final 3 seconds: black background, white text, centered.
-   Text: 'Results may vary. Past results do not guarantee future outcomes. Not legal advice.'
-   Font size: small but readable. No voiceover during disclaimer.
-
----
-
-## B-ROLL THEME LIBRARY BY HOOK TYPE
-
-Hook Type 1 (Broad Unlawful Firing):
-  HR meeting room, security badge being returned, office desk being cleared,
-  person walking out of building looking defeated
-
-Hook Type 2 (Hyper-Specific Industry / Security):
-  Security guard uniform, late-night patrol, paycheck/stub, time clock, warehouse dock
-
-Hook Type 3 (Protected Class / Sick Leave):
-  Hospital wristband, doctor's note, medication bottles, HR letter closeup,
-  person looking at phone worried
-
-Hook Type 4 (Wage Theft):
-  Empty wallet, paycheck with red X, calculator, time clock, person counting cash that's too little
-
-Hook Type 5 (Visual Metaphor / Vacation):
-  Cheap motel exterior, stressed family in car, empty parking lot,
-  then contrast: beach/resort glimpse
-
-Hook Type 6 (Testimonial / Social Proof):
-  Real-looking home setting, person speaking to camera, courthouse exterior,
-  legal documents being signed
-
-Hook Type 7 (Pattern Interrupt):
-  Closeup of corporate memo, boardroom, employer shaking hands while employee
-  watches from background
-
----
-
-## REVID.AI PROMPT OUTPUT FORMAT
-
-Output ONLY the Revid.ai prompt below. No preamble. No explanation.
-
-REVID.AI EDIT PROMPT:
-Source video: [HEYGEN_VIDEO_URL]
-Target duration: 20 seconds maximum (hard limit)
-B-ROLL: Layer [SPECIFIC B-ROLL THEME from hook type] over the talking head. \
-Use real, grounded footage — not generic stock. \
-Cut frequency: Hook section = every 1–1.5s. Body = every 2–3s. CTA = 1 sustained shot.
-CAPTIONS: Burn-in synced captions. Font: bold sans-serif. White text, black stroke. \
-Mobile-optimized size. HIGHLIGHT in yellow: '[HOOK KEY PHRASE]' | 'up to $100,000' | 'Free Strategy Session'.
-PACING: Total spoken content = 17 seconds. Reserve final 3 seconds for disclaimer.
-DISCLAIMER (seconds 17–20): Black background. White centered text: \
-'Results may vary. Past results do not guarantee future outcomes. Not legal advice.' \
-No audio. Small readable font.
-FORMAT: Portrait 9:16 (primary). Also render Square 1:1 version.
-ENERGY: [MATCH TO DIRECTOR'S NOTE FROM SCRIPT — e.g. urgent and authoritative / warm and empathetic]
+[Black screen, white text]
+{Disclaimer text}
 """
 
 
@@ -119,28 +62,27 @@ async def generate_revid_prompt(
     script: USAEAScript,
 ) -> str:
     """
-    Calls Claude Sonnet 4.6 to generate a Revid.ai edit prompt.
+    Calls Claude Sonnet 4.6 to generate a Typeframes/Revid.ai video prompt.
 
     Args:
-        heygen_video_url: The completed Heygen talking head video URL.
+        heygen_video_url: The completed HeyGen talking head video URL (for reference).
         script: The parsed USAEAScript for this ad.
 
     Returns:
-        A Revid.ai edit prompt string, ready to send to the Revid.ai API.
+        A text prompt string, ready to send to the Typeframes API.
     """
     client = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
 
     user_message = (
-        f"Heygen video URL: {heygen_video_url}\n\n"
-        f"Original script:\n"
+        f"Create a Typeframes video prompt for this ad script.\n\n"
         f"Director's Note: {script.director_note}\n"
         f"Hook Type: {script.hook_type_number} ({script.hook_type_name}) | "
         f"Emotional Trigger: {script.emotional_trigger}\n"
         f"CTA Variant: {script.cta_variant}\n\n"
-        f"[HOOK]\n{script.hook_text}\n\n"
-        f"[BODY]\n{script.body_text}\n\n"
-        f"[CTA]\n{script.cta_text}\n\n"
-        f'[DISCLAIMER — on-screen only]\n'
+        f"[HOOK — 3 seconds]\n{script.hook_text}\n\n"
+        f"[BODY — 10 seconds]\n{script.body_text}\n\n"
+        f"[CTA — 4 seconds]\n{script.cta_text}\n\n"
+        f"[DISCLAIMER — 3 seconds, on-screen only]\n"
         f'"{script.disclaimer_text}"'
     )
 
@@ -148,7 +90,7 @@ async def generate_revid_prompt(
 
     response = await client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=800,
+        max_tokens=400,
         system=REVID_PROMPT_AGENT_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )

@@ -84,6 +84,7 @@ class HeyGenClient:
         script: str,
         avatar_id: Optional[str] = None,
         voice_id: Optional[str] = None,
+        look_id: Optional[str] = None,
         width: int = 1080,
         height: int = 1920,
     ) -> str:
@@ -94,14 +95,18 @@ class HeyGenClient:
         if not avatar_id or not voice_id:
             avatar_id, voice_id = await self.get_default_avatar_and_voice()
 
+        character: dict = {
+            "type": "avatar",
+            "avatar_id": avatar_id,
+            "avatar_style": "normal",
+        }
+        if look_id:
+            character["avatar_look_id"] = look_id
+
         payload = {
             "video_inputs": [
                 {
-                    "character": {
-                        "type": "avatar",
-                        "avatar_id": avatar_id,
-                        "avatar_style": "normal",
-                    },
+                    "character": character,
                     "voice": {
                         "type": "text",
                         "input_text": script,
@@ -183,6 +188,7 @@ class HeyGenClient:
         output_path: str | Path,
         avatar_id: Optional[str] = None,
         voice_id: Optional[str] = None,
+        look_id: Optional[str] = None,
         width: int = 1080,
         height: int = 1920,
     ) -> Path:
@@ -190,6 +196,6 @@ class HeyGenClient:
         End-to-end: submit → poll → download.
         Returns local path to downloaded video.
         """
-        video_id = await self.generate_video(script, avatar_id, voice_id, width, height)
+        video_id = await self.generate_video(script, avatar_id, voice_id, look_id, width, height)
         url = await self.poll_video_status(video_id)
         return await self.download_video(url, output_path)

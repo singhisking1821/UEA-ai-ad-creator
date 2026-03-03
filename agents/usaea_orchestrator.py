@@ -190,23 +190,31 @@ async def run_usaea_job(
     notify("🎭 Step 4/6: Submitting scripts to HeyGen (AI talking head)...")
     heygen = HeyGenClient()
 
-    try:
-        avatar_id, voice_id = await heygen.get_default_avatar_and_voice()
-    except Exception as e:
-        logger.error(f"HeyGen avatar/voice lookup failed: {e}")
-        result.errors.append(f"HeyGen setup failed: {e}")
-        notify(f"❌ HeyGen setup failed: {e}")
-        result.duration_seconds = time.time() - start_time
-        return result
-
     async def _generate_heygen(script: USAEAScript) -> tuple[int, str]:
         """Submit one script to HeyGen. Returns (ad_number, heygen_video_url)."""
-        notify(f"   🎭 Ad #{script.number}: Submitting {len(script.spoken_text.split())} words to HeyGen...")
+        # Per-ad avatar + voice selection (runs in parallel for each script)
+        from agents.avatar_selector import select_avatar_for_script
+        av_id, vo_id, look_id = await select_avatar_for_script(script)
+        if not av_id or not vo_id:
+            notify(
+                f"   ⚠️ Ad #{script.number}: Avatar pool returned empty "
+                f"(av={'yes' if av_id else 'no'}, vo={'yes' if vo_id else 'no'}) "
+                f"— falling back to HeyGen defaults"
+            )
+            _av, _vo = await heygen.get_default_avatar_and_voice()
+            av_id = av_id or _av
+            vo_id = vo_id or _vo
+        notify(
+            f"   🎭 Ad #{script.number}: avatar={av_id[:8]}… voice={vo_id[:8]}… "
+            + (f"look={look_id[:8]}… " if look_id else "")
+            + f"— submitting {len(script.spoken_text.split())} words to HeyGen..."
+        )
 
         video_id = await heygen.generate_video(
             script=script.spoken_text,
-            avatar_id=avatar_id,
-            voice_id=voice_id,
+            avatar_id=av_id,
+            voice_id=vo_id,
+            look_id=look_id or None,
             width=1080,
             height=1920,
         )
@@ -277,7 +285,7 @@ async def run_usaea_job(
         output_path = output_dir / output_filename
 
         final_path = await revid.create_and_download(
-            revid_prompt=revid_prompt,
+            script=revid_prompt,
             output_path=output_path,
         )
 

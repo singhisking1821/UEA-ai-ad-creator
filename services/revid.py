@@ -1,16 +1,18 @@
 """
-Revid.ai API client — V3 (fixed).
+Revid.ai / Typeframes API client — V2.
 
-Root cause of ConnectError: The old base URL https://api.revid.ai does not resolve.
-The Revid Public API v3 uses https://www.revid.ai as the base, with REST endpoints
-under /api/v3/. Auth is via the header "x-api-key" (NOT "Authorization: Bearer").
+Revid.ai and Typeframes share the same API.
+Base URL: https://api.typeframes.com
+Auth header: "key" (your API key from https://www.revid.ai/account)
+Endpoint: POST /v2/videos
 
 References:
-    - Revid Public API v3 Postman collection: https://documenter.getpostman.com/view/36975521/2sBXcGEfaB
+    - Typeframes Public API V2 Postman collection:
+      https://documenter.getpostman.com/view/3209066/2sA3JDgjpp
     - Get your API key at: https://www.revid.ai/account
 
 Environment variables required:
-    REVID_API_KEY — Your Revid.ai API key (set in Railway Variables or .env)
+    REVID_API_KEY — Your Revid.ai / Typeframes API key
 """
 from __future__ import annotations
 
@@ -24,13 +26,12 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import config
 from utils.logger import logger
 
-# ✅ FIXED: Correct V3 base URL (the old https://api.revid.ai does not exist)
-REVID_BASE = "https://www.revid.ai"
+REVID_BASE = "https://api.typeframes.com"
 
 
 class RevidClient:
     """
-    Revid.ai API v3 client.
+    Revid.ai / Typeframes API V2 client.
 
     Typical usage:
         client = RevidClient()
@@ -40,42 +41,53 @@ class RevidClient:
     def __init__(self, api_key: str = ""):
         self.api_key = api_key or config.REVID_API_KEY
         self.headers = {
-            # ✅ FIXED: V3 uses "x-api-key" header, NOT "Authorization: Bearer"
-            "x-api-key": self.api_key,
+            "key": self.api_key,
             "Content-Type": "application/json",
         }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=30))
     async def create_video(self, script: str) -> str:
         """
-        Submits a video creation job to Revid.ai V3.
+        Submits a video creation job to Revid.ai / Typeframes V2.
         Returns the video/job id string.
 
-        V3 endpoint: POST /api/v3/videos
-        Payload key: "inputText" (the script/prompt for the video)
+        Endpoint: POST /v2/videos
         """
         payload = {
-            "inputText": script,
-            # Optional V3 fields you can add as needed:
-            # "ratio": "9:16",           # portrait for Facebook/Instagram
-            # "mediaType": "stockVideo", # or "aiVideo", "aiImage"
-            # "language": "English",
+            "template": "tiktok",
+            "inputs": {
+                "text": script,
+            },
         }
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        logger.info(
+            f"Revid.ai: submitting video creation to {REVID_BASE}/v2/videos "
+            f"(text length={len(script)} chars)"
+        )
+
+        async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(
-                f"{REVID_BASE}/api/v3/videos",
+                f"{REVID_BASE}/v2/videos",
                 headers=self.headers,
                 json=payload,
+            )
+            # Log the raw response BEFORE raise_for_status so we can debug errors
+            logger.info(
+                f"Revid.ai create response [{resp.status_code}]: "
+                f"{resp.text[:1000]}"
             )
             resp.raise_for_status()
             data = resp.json()
 
-        # V3 response: { "id": "...", ... }  (top-level "id" field)
+        # Try multiple possible response field names for the job/video ID
         job_id = (
             data.get("id")
             or data.get("videoId")
+            or data.get("video_id")
+            or data.get("taskId")
+            or data.get("task_id")
             or data.get("data", {}).get("id")
+            or data.get("data", {}).get("videoId")
         )
         if not job_id:
             raise RuntimeError(
@@ -87,14 +99,18 @@ class RevidClient:
 
     async def get_video_status(self, job_id: str) -> dict:
         """
-        Returns the current status dict for a Revid.ai V3 job.
+        Returns the current status dict for a Revid.ai job.
 
-        V3 endpoint: GET /api/v3/videos/{id}
+        Tries GET /v2/videos/{id} (common REST pattern).
         """
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                f"{REVID_BASE}/api/v3/videos/{job_id}",
+                f"{REVID_BASE}/v2/videos/{job_id}",
                 headers=self.headers,
+            )
+            logger.info(
+                f"Revid.ai status response [{resp.status_code}]: "
+                f"{resp.text[:1000]}"
             )
             resp.raise_for_status()
             return resp.json()
@@ -108,33 +124,46 @@ class RevidClient:
         """
         Polls Revid.ai until the video job is complete.
         Returns the video download URL.
-
-        V3 status values: "pending" | "processing" | "completed" | "failed"
-        V3 video URL field: "outputUrl"
         """
         start = time.time()
         while time.time() - start < max_wait_seconds:
-            data = await self.get_video_status(job_id)
+            try:
+                data = await self.get_video_status(job_id)
+            except httpx.HTTPStatusError as e:
+                logger.warning(
+                    f"Revid.ai status poll error [{e.response.status_code}]: "
+                    f"{e.response.text[:500]}  — will retry..."
+                )
+                await asyncio.sleep(poll_interval)
+                continue
 
-            # V3 status is at top-level "status" field
+            # Try multiple possible field names for status
             status = (
                 data.get("status")
+                or data.get("state")
                 or data.get("data", {}).get("status")
                 or ""
-            ).lower()
+            )
+            if isinstance(status, str):
+                status = status.lower()
 
             logger.info(f"Revid.ai job {job_id}: status={status!r}")
 
-            if status in ("completed", "done", "finished", "success"):
-                # V3 video URL field is "outputUrl"
+            if status in ("completed", "done", "finished", "success", "ready"):
+                # Try multiple possible field names for the video URL
                 video_url = (
-                    data.get("outputUrl")
-                    or data.get("output_url")
+                    data.get("url")
                     or data.get("videoUrl")
                     or data.get("video_url")
-                    or data.get("url")
-                    or data.get("data", {}).get("outputUrl")
+                    or data.get("outputUrl")
+                    or data.get("output_url")
+                    or data.get("downloadUrl")
+                    or data.get("download_url")
+                    or data.get("result", {}).get("url")
+                    or data.get("output", {}).get("url")
+                    or data.get("data", {}).get("url")
                     or data.get("data", {}).get("videoUrl")
+                    or data.get("data", {}).get("outputUrl")
                 )
                 if not video_url:
                     raise RuntimeError(
@@ -149,7 +178,7 @@ class RevidClient:
                     data.get("error")
                     or data.get("message")
                     or data.get("data", {}).get("error")
-                    or "Unknown Revid.ai error"
+                    or f"Unknown error. Full response: {data}"
                 )
                 raise RuntimeError(f"Revid.ai job {job_id} failed: {error_msg}")
 
@@ -171,7 +200,7 @@ class RevidClient:
                     async for chunk in resp.aiter_bytes(chunk_size=65536):
                         f.write(chunk)
 
-        logger.info(f"Downloaded Revid.ai video → {output_path}")
+        logger.info(f"Downloaded Revid.ai video -> {output_path}")
         return output_path
 
     async def create_and_download(
@@ -180,7 +209,7 @@ class RevidClient:
         output_path: str | Path,
     ) -> Path:
         """
-        End-to-end: submit script → poll until complete → download .mp4.
+        End-to-end: submit script -> poll until complete -> download .mp4.
         Returns local path to the downloaded video.
         """
         job_id = await self.create_video(script)

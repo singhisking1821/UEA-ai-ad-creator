@@ -107,6 +107,32 @@ async def main() -> None:
         await asyncio.Event().wait()
         return
 
+    # ── Log avatar/voice pool status ──────────────────────────────────────────
+    avatar_pool = cfg.HEYGEN_AVATAR_POOL
+    voice_pool = cfg.HEYGEN_VOICE_POOL
+    if avatar_pool:
+        console.print(f"[green]Avatar pool: {len(avatar_pool)} avatar(s) loaded[/green]")
+        for av in avatar_pool:
+            console.print(
+                f"  [cyan]#{av['index']}[/cyan] {av['description'][:50]}  "
+                f"gender={av['gender'] or 'n/a'}  "
+                f"avatar_id={av['avatar_id'][:12]}...  "
+                f"look_id={'yes' if av.get('look_id') else 'no'}"
+            )
+    else:
+        console.print("[yellow]Avatar pool: EMPTY — will use HeyGen default avatar[/yellow]")
+
+    if voice_pool:
+        console.print(f"[green]Voice pool:  {len(voice_pool)} voice(s) loaded[/green]")
+        for v in voice_pool:
+            console.print(
+                f"  [cyan]#{v['index']}[/cyan] {v['description'][:50]}  "
+                f"gender={v['gender'] or 'n/a'}  "
+                f"voice_id={v['voice_id'][:12]}..."
+            )
+    else:
+        console.print("[yellow]Voice pool:  EMPTY — will use HeyGen default voice[/yellow]")
+
     console.print(
         "[bold green]🚀 AI Ad Creator starting...[/bold green]\n"
         f"Model:       [cyan]{cfg.CLAUDE_MODEL}[/cyan]\n"
