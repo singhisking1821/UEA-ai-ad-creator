@@ -28,4 +28,4 @@ ENV PORT=8080
 # Expose the webhook server port
 EXPOSE 8080
 
-CMD ["python3", "main.py"]
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
