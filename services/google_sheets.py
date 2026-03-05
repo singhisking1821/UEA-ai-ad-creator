@@ -1,179 +1,145 @@
 """
-Google Sheets client: append ad records and script history to the tracking spreadsheet.
-
-Two tabs are used:
-  Ads            — Final video upload log (existing functionality)
-  Script_History — USAEA cross-session uniqueness log (new for USAEA pipeline)
-                   Columns: Date | Hook Type | Emotional Trigger | CTA Variant |
-                            Hook First Words | Session ID | Word Count
+Google Sheets client using gspread.
+Two tabs:
+  - 'Script Log'  — deduplication log for generated scripts
+  - 'Output Log'  — final rendered video metadata
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime
+from typing import Any
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+import gspread
+from google.oauth2.service_account import Credentials
 
-import config
-from utils.logger import logger
+from config.settings import settings
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/spreadsheets",
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file',
 ]
 
-ADS_RANGE            = "Ads!A:Z"
-HISTORY_RANGE        = "Script_History!A:Z"
-HISTORY_HEADER_RANGE = "Script_History!A1:G1"
+SCRIPT_LOG_TAB = 'Script Log'
+OUTPUT_LOG_TAB = 'Output Log'
+
+SCRIPT_LOG_HEADERS = [
+    'script_id', 'created_at', 'ad_type', 'state', 'hook', 'body',
+    'cta', 'full_script', 'estimated_seconds', 'avatar_key', 'avatar_reasoning', 'status',
+]
+
+OUTPUT_LOG_HEADERS = [
+    'script_id', 'created_at', 'ad_type', 'state', 'avatar_key',
+    'heygen_video_url', 'shotstack_render_url', 'drive_url', 'render_duration_seconds',
+]
 
 
-def _get_credentials():
-    from pathlib import Path
-    creds_path = Path(config.GOOGLE_CREDENTIALS_PATH)
-    if not creds_path.exists():
-        raise FileNotFoundError(f"Google credentials not found: {creds_path}")
-    return service_account.Credentials.from_service_account_file(
-        str(creds_path), scopes=SCOPES
-    )
+def _get_client() -> gspread.Client:
+    creds_dict = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    return gspread.authorize(creds)
 
 
-class GoogleSheetsClient:
-    def __init__(self):
-        creds = _get_credentials()
-        self.service = build("sheets", "v4", credentials=creds)
-        self.sheet_id = config.GOOGLE_SHEET_ID
+def _ensure_tab(
+    spreadsheet: gspread.Spreadsheet,
+    tab_name: str,
+    headers: list[str],
+) -> gspread.Worksheet:
+    try:
+        ws = spreadsheet.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=len(headers))
+        ws.append_row(headers)
+        logger.info(f'Created tab: {tab_name}')
+    else:
+        existing = ws.row_values(1)
+        if not existing:
+            ws.append_row(headers)
+    return ws
 
-    # ── Ads Tab ───────────────────────────────────────────────────────────────
 
-    def ensure_header(self) -> None:
-        """Adds a header row to the Ads tab if it is empty."""
-        result = (
-            self.service.spreadsheets()
-            .values()
-            .get(spreadsheetId=self.sheet_id, range="Ads!A1:Z1")
-            .execute()
-        )
-        rows = result.get("values", [])
-        if not rows:
-            header = [
-                "Date", "Ad #", "Website", "Ad Type", "Script Preview",
-                "Drive Link", "Status",
-            ]
-            self.service.spreadsheets().values().append(
-                spreadsheetId=self.sheet_id,
-                range="Ads!A1",
-                valueInputOption="RAW",
-                body={"values": [header]},
-            ).execute()
+def _sync_get_recent_scripts(limit: int) -> list[dict]:
+    gc = _get_client()
+    ss = gc.open_by_key(settings.GOOGLE_SHEET_ID)
+    ws = _ensure_tab(ss, SCRIPT_LOG_TAB, SCRIPT_LOG_HEADERS)
+    rows = ws.get_all_records()
+    return rows[-limit:] if len(rows) > limit else rows
 
-    def append_ad_record(
-        self,
-        website: str,
-        ad_number: int,
-        ad_type: str,
-        script_preview: str,
-        drive_link: str,
-        status: str = "Ready",
-    ) -> None:
-        """Appends one row to the Ads tab."""
-        self.ensure_header()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        row = [now, ad_number, website, ad_type, script_preview[:120], drive_link, status]
-        self.service.spreadsheets().values().append(
-            spreadsheetId=self.sheet_id,
-            range=ADS_RANGE,
-            valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
-            body={"values": [row]},
-        ).execute()
-        logger.info(f"Logged ad #{ad_number} to Google Sheets (Ads tab)")
 
-    # ── Script_History Tab (USAEA cross-session uniqueness) ───────────────────
+def _sync_log_scripts(scripts_data: list[dict]) -> None:
+    gc = _get_client()
+    ss = gc.open_by_key(settings.GOOGLE_SHEET_ID)
+    ws = _ensure_tab(ss, SCRIPT_LOG_TAB, SCRIPT_LOG_HEADERS)
+    for s in scripts_data:
+        row = [
+            s.get('script_id', ''),
+            s.get('created_at', datetime.utcnow().isoformat()),
+            s.get('ad_type', ''),
+            s.get('state', ''),
+            s.get('hook', ''),
+            s.get('body', ''),
+            s.get('cta', ''),
+            s.get('full_script', ''),
+            s.get('estimated_seconds', 0),
+            s.get('avatar_key', ''),
+            s.get('avatar_reasoning', ''),
+            'generated',
+        ]
+        ws.append_row(row)
+    logger.info(f'Logged {len(scripts_data)} script(s) to Script Log tab')
 
-    def _ensure_script_history_header(self) -> None:
-        """Adds a header row to the Script_History tab if it is empty."""
-        result = (
-            self.service.spreadsheets()
-            .values()
-            .get(spreadsheetId=self.sheet_id, range=HISTORY_HEADER_RANGE)
-            .execute()
-        )
-        rows = result.get("values", [])
-        if not rows:
-            header = [
-                "Date", "Hook Type", "Emotional Trigger", "CTA Variant",
-                "Hook First Words", "Session ID", "Word Count",
-            ]
-            self.service.spreadsheets().values().append(
-                spreadsheetId=self.sheet_id,
-                range="Script_History!A1",
-                valueInputOption="RAW",
-                body={"values": [header]},
-            ).execute()
-            logger.info("Created Script_History header row in Google Sheets")
 
-    def log_script_history(
-        self,
-        hook_type: str,
-        trigger: str,
-        cta_variant: str,
-        hook_first_words: str,
-        session_id: str,
-        word_count: int,
-    ) -> None:
-        """
-        Appends one row to the Script_History tab.
-        Called after each USAEA script is generated to prevent cross-session repetition.
-        """
-        self._ensure_script_history_header()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        row = [now, hook_type, trigger, cta_variant, hook_first_words[:60], session_id, word_count]
-        self.service.spreadsheets().values().append(
-            spreadsheetId=self.sheet_id,
-            range=HISTORY_RANGE,
-            valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
-            body={"values": [row]},
-        ).execute()
-        logger.info(f"Logged to Script_History: {hook_type} / {trigger}")
+def _sync_log_output(output_data: dict) -> None:
+    gc = _get_client()
+    ss = gc.open_by_key(settings.GOOGLE_SHEET_ID)
+    ws = _ensure_tab(ss, OUTPUT_LOG_TAB, OUTPUT_LOG_HEADERS)
+    row = [
+        output_data.get('script_id', ''),
+        output_data.get('created_at', datetime.utcnow().isoformat()),
+        output_data.get('ad_type', ''),
+        output_data.get('state', ''),
+        output_data.get('avatar_key', ''),
+        output_data.get('heygen_video_url', ''),
+        output_data.get('shotstack_render_url', ''),
+        output_data.get('drive_url', ''),
+        output_data.get('render_duration_seconds', 0),
+    ]
+    ws.append_row(row)
+    logger.info(f"Logged output for script {output_data.get('script_id')} to Output Log tab")
 
-    def get_script_history(self, limit: int = 20) -> list[dict]:
-        """
-        Reads the most recent `limit` rows from the Script_History tab.
-        Returns a list of dicts with keys:
-            date, hook_type, trigger, cta_variant, hook_first_words, session_id, word_count
-        Returns [] if the tab is empty or doesn't exist yet.
-        """
-        try:
-            result = (
-                self.service.spreadsheets()
-                .values()
-                .get(spreadsheetId=self.sheet_id, range=HISTORY_RANGE)
-                .execute()
-            )
-        except Exception as e:
-            logger.warning(f"Could not read Script_History tab (non-fatal): {e}")
-            return []
 
-        rows = result.get("values", [])
-        if not rows or len(rows) < 2:
-            return []   # Empty or header-only
+def _sync_get_last_cta_used() -> str:
+    gc = _get_client()
+    ss = gc.open_by_key(settings.GOOGLE_SHEET_ID)
+    try:
+        ws = ss.worksheet(SCRIPT_LOG_TAB)
+        rows = ws.get_all_records()
+        if rows:
+            return str(rows[-1].get('cta', ''))
+    except gspread.WorksheetNotFound:
+        pass
+    return ''
 
-        # Skip header row; take the last `limit` data rows
-        data_rows = rows[1:][-limit:]
 
-        history = []
-        for row in data_rows:
-            # Pad to 7 columns in case trailing cells are empty
-            row = row + [""] * (7 - len(row))
-            history.append({
-                "date":             row[0],
-                "hook_type":        row[1],
-                "trigger":          row[2],
-                "cta_variant":      row[3],
-                "hook_first_words": row[4],
-                "session_id":       row[5],
-                "word_count":       row[6],
-            })
+# ── Async wrappers ────────────────────────────────────────────────────────────
 
-        return history
+async def get_recent_scripts(limit: int = 30) -> list[dict]:
+    return await asyncio.to_thread(_sync_get_recent_scripts, limit)
+
+
+async def log_scripts(scripts: list[Any]) -> None:
+    scripts_data = [s.model_dump(mode='json') for s in scripts]
+    await asyncio.to_thread(_sync_log_scripts, scripts_data)
+
+
+async def log_output(output: Any) -> None:
+    output_data = output.model_dump(mode='json')
+    await asyncio.to_thread(_sync_log_output, output_data)
+
+
+async def get_last_cta_used() -> str:
+    return await asyncio.to_thread(_sync_get_last_cta_used)

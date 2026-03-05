@@ -1,172 +1,99 @@
 """
-AI Ad Creator — Entry Point
-
-Usage:
-  python main.py           # Start the Telegram bot
-  python main.py --setup   # Run the API key setup wizard (local only)
+USAEA Ad Factory — FastAPI entry point.
+Handles Telegram webhooks and routes ad production requests to the pipeline.
 """
 from __future__ import annotations
 
-import argparse
 import asyncio
-import sys
 
-from rich.console import Console
+import httpx
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-console = Console()
+from config.settings import settings
+from orchestrator.pipeline import parse_telegram_prompt, run_pipeline
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
-def is_interactive() -> bool:
-    """Returns True if running in a real terminal (local), False on cloud servers."""
-    return sys.stdin.isatty()
-
-
-def check_ffmpeg() -> bool:
-    """Checks that ffmpeg and ffprobe are available on PATH."""
-    import subprocess
-    for tool in ["ffmpeg", "ffprobe"]:
-        try:
-            subprocess.run([tool, "-version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
-    return True
+app = FastAPI(title='USAEA Ad Factory', version='1.0.0')
 
 
-def check_and_report_missing_keys(cfg) -> bool:
-    """
-    Checks for missing required env vars.
-    - On cloud (non-interactive): prints a clear list of what's missing and exits.
-    - On local (interactive): runs the setup wizard to collect them interactively.
-    Returns True if all keys are present, False if still missing after wizard.
-    """
-    if cfg.validate_config():
-        return True
+# ── Startup: register Telegram webhook ───────────────────────────────────────
 
-    missing = [k["key"] for k in cfg.REQUIRED_KEYS if not __import__("os").getenv(k["key"])]
-
-    if not is_interactive():
-        # Running on Railway/cloud — cannot ask for input, just report and exit
-        console.print("\n[red bold]❌ Missing required environment variables![/red bold]")
-        console.print(
-            "[yellow]Add these in Railway → your service → Variables tab:[/yellow]\n"
-        )
-        for key in missing:
-            console.print(f"  [red]•[/red] {key}")
-        console.print(
-            "\n[dim]See the README for what each variable is and where to get it.[/dim]\n"
-        )
-        return False
-    else:
-        # Running locally — run the interactive wizard
-        console.print("[yellow]Some API keys are missing. Running setup wizard...[/yellow]\n")
-        cfg.run_setup_wizard()
-        import importlib
-        importlib.reload(cfg)
-        return cfg.validate_config()
-
-
-async def main() -> None:
-    parser = argparse.ArgumentParser(description="AI Ad Creator")
-    parser.add_argument("--setup", action="store_true", help="Run API key setup wizard")
-    args = parser.parse_args()
-
-    # ── Setup wizard (local only) ─────────────────────────────────────────────
-    if args.setup:
-        if not is_interactive():
-            console.print("[red]--setup can only be run locally, not on a cloud server.[/red]")
-            sys.exit(1)
-        from config import run_setup_wizard
-        run_setup_wizard()
-        return
-
-    import config as cfg
-
-    # ── Start webhook server FIRST (Railway healthcheck requires this) ─────────
-    # Must bind before API key validation so /health always responds.
-    # If keys are missing, the service stays alive (healthcheck green) while
-    # the operator adds the missing variables in Railway → Variables.
-    from services.webhook_server import start_webhook_server
-    asyncio.create_task(start_webhook_server(host="0.0.0.0", port=cfg.WEBHOOK_PORT))
-    await asyncio.sleep(0.1)  # yield so the server can bind to the port
-
-    # ── Check FFmpeg (needed only for the generic pipeline, not USAEA) ─────────
-    if not check_ffmpeg():
-        console.print(
-            "[yellow]⚠️  FFmpeg not found — generic ad pipeline will fail, "
-            "but the USAEA pipeline (Revid.ai) does not need it.[/yellow]\n"
-            "To install: macOS: brew install ffmpeg | Ubuntu: sudo apt install ffmpeg"
-        )
-        # Don't exit — USAEA pipeline works without FFmpeg
-
-    # ── Check API keys ────────────────────────────────────────────────────────
-    if not check_and_report_missing_keys(cfg):
-        # Do NOT sys.exit — keep the event loop alive so /health stays green.
-        # Railway will show the service as healthy; check the logs for which
-        # variables are missing and add them in Railway → Variables.
-        console.print("[red]Bot will not start until all missing variables are added.[/red]")
-        await asyncio.Event().wait()
-        return
-
-    # ── Log avatar/voice pool status ──────────────────────────────────────────
-    avatar_pool = cfg.HEYGEN_AVATAR_POOL
-    voice_pool = cfg.HEYGEN_VOICE_POOL
-    if avatar_pool:
-        console.print(f"[green]Avatar pool: {len(avatar_pool)} avatar(s) loaded[/green]")
-        for av in avatar_pool:
-            console.print(
-                f"  [cyan]#{av['index']}[/cyan] {av['description'][:50]}  "
-                f"gender={av['gender'] or 'n/a'}  "
-                f"avatar_id={av['avatar_id'][:12]}...  "
-                f"look_id={'yes' if av.get('look_id') else 'no'}"
-            )
-    else:
-        console.print("[yellow]Avatar pool: EMPTY — will use HeyGen default avatar[/yellow]")
-
-    if voice_pool:
-        console.print(f"[green]Voice pool:  {len(voice_pool)} voice(s) loaded[/green]")
-        for v in voice_pool:
-            console.print(
-                f"  [cyan]#{v['index']}[/cyan] {v['description'][:50]}  "
-                f"gender={v['gender'] or 'n/a'}  "
-                f"voice_id={v['voice_id'][:12]}..."
-            )
-    else:
-        console.print("[yellow]Voice pool:  EMPTY — will use HeyGen default voice[/yellow]")
-
-    console.print(
-        "[bold green]🚀 AI Ad Creator starting...[/bold green]\n"
-        f"Model:       [cyan]{cfg.CLAUDE_MODEL}[/cyan]\n"
-        f"Output dir:  [cyan]{cfg.OUTPUT_DIR}[/cyan]\n"
-        f"Webhook port:[cyan]{cfg.WEBHOOK_PORT}[/cyan]\n"
-        + (
-            f"HeyGen webhook URL: [cyan]{cfg.HEYGEN_WEBHOOK_URL}[/cyan]\n"
-            if cfg.HEYGEN_WEBHOOK_URL
-            else "[yellow]HEYGEN_WEBHOOK_URL not set — will use polling fallback[/yellow]\n"
-        )
+@app.on_event('startup')
+async def register_telegram_webhook() -> None:
+    webhook_url = f'{settings.BASE_URL}/webhook/telegram'
+    api_url = (
+        f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/setWebhook'
     )
-
-    # ── Start Telegram Bot ────────────────────────────────────────────────────
-    from bot.telegram_bot import build_application, set_bot_commands
-
-    app = build_application()
-
-    async with app:
-        await set_bot_commands(app)
-
-        console.print("[green]✅ Bot is running. Send a message on Telegram to start![/green]")
-        await app.start()
-        await app.updater.start_polling(allowed_updates=["message"])
-
-        try:
-            await asyncio.Event().wait()
-        except (KeyboardInterrupt, SystemExit):
-            pass
-        finally:
-            await app.updater.stop()
-            await app.stop()
-
-    console.print("[yellow]Bot stopped.[/yellow]")
+    payload = {
+        'url': webhook_url,
+        'secret_token': settings.TELEGRAM_WEBHOOK_SECRET,
+        'allowed_updates': ['message'],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(api_url, json=payload)
+            data = resp.json()
+        if data.get('ok'):
+            logger.info(f'Telegram webhook registered: {webhook_url}')
+        else:
+            logger.warning(f'Telegram webhook registration failed: {data}')
+    except Exception as exc:
+        logger.warning(f'Could not register Telegram webhook at startup: {exc}')
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# ── Health check ──────────────────────────────────────────────────────────────
+
+@app.get('/health')
+async def health() -> dict:
+    return {'status': 'ok', 'version': '1.0.0'}
+
+
+# ── Telegram webhook ──────────────────────────────────────────────────────────
+
+@app.post('/webhook/telegram')
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str = Header(default=''),
+) -> JSONResponse:
+    """
+    Receives Telegram updates.
+    Validates the secret token, checks the allowed chat ID,
+    then fires the pipeline as a background task and returns 200 immediately.
+    """
+    # Validate secret token
+    if x_telegram_bot_api_secret_token != settings.TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail='Invalid secret token')
+
+    body = await request.json()
+    message = body.get('message', {})
+    chat = message.get('chat', {})
+    chat_id = chat.get('id')
+    text = message.get('text', '').strip()
+
+    # Validate chat ID
+    if chat_id != settings.TELEGRAM_ALLOWED_CHAT_ID:
+        logger.warning(f'Rejected message from unauthorized chat_id: {chat_id}')
+        return JSONResponse({'ok': True})
+
+    if not text:
+        return JSONResponse({'ok': True})
+
+    logger.info(f'Telegram message from chat {chat_id}: {text[:80]}')
+
+    # Parse and launch pipeline in background so we return 200 immediately
+    ad_request = await parse_telegram_prompt(text, chat_id)
+    asyncio.create_task(run_pipeline(ad_request))
+
+    return JSONResponse({'ok': True})
+
+
+# ── Utility: manual webhook registration ─────────────────────────────────────
+
+@app.post('/webhook/register')
+async def register_webhook() -> dict:
+    """Utility endpoint to manually trigger Telegram webhook registration."""
+    await register_telegram_webhook()
+    return {'status': 'webhook registration triggered'}
