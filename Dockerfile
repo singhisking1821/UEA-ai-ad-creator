@@ -1,8 +1,7 @@
 FROM python:3.11-slim
 
-# FFmpeg is needed only for the generic pipeline.
-# The USAEA pipeline (Revid.ai) does not require it, but we keep it
-# so the generic pipeline remains functional.
+# FFmpeg kept for potential future local processing needs.
+# The USAEA pipeline uses Shotstack for all rendering (no local FFmpeg required).
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \

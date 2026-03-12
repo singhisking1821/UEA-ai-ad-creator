@@ -17,7 +17,7 @@ The Shotstack edit payload has this top-level structure:
   },
   "output": {
     "format": "mp4",
-    "resolution": "1080"
+    "size": { "width": 1080, "height": 1920 }
   }
 }
 
@@ -104,7 +104,7 @@ Return ONLY a valid JSON object with exactly two fields. No prose, no markdown, 
     },
     "output": {
       "format": "mp4",
-      "resolution": "1080"
+      "size": { "width": 1080, "height": 1920 }
     }
   },
   "track_summary": "<one paragraph plain English description of the timeline: what's on each track, when each B-roll clip appears, and what the end screen shows>"

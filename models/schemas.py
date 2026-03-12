@@ -1,3 +1,4 @@
+import uuid
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
@@ -12,7 +13,7 @@ class AdRequest(BaseModel):
 
 
 class AdScript(BaseModel):
-    script_id: str
+    script_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     ad_type: str
     state: str
     hook: str

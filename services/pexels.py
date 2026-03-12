@@ -22,7 +22,7 @@ async def search_clips(query: str, per_page: int = 5) -> list[dict]:
     params = {
         'query': query,
         'per_page': per_page,
-        'orientation': 'landscape',
+        'orientation': 'portrait',
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(

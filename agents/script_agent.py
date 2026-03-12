@@ -87,12 +87,13 @@ async def generate_scripts(request: AdRequest) -> list[AdScript]:
     for item in parsed:
         script = AdScript(**item)
 
-        # Validate and fix timing if over 22s
+        # Validate and fix timing — spoken script must leave 3.5s for end screen
+        max_spoken = settings.MAX_VIDEO_SECONDS - 3.5
         actual_seconds = estimate_duration(script.full_script)
-        if actual_seconds > settings.MAX_VIDEO_SECONDS:
+        if actual_seconds > max_spoken:
             logger.warning(
                 f'Script {script.script_id} estimated {actual_seconds:.1f}s > '
-                f'{settings.MAX_VIDEO_SECONDS}s — requesting shorten'
+                f'{max_spoken:.1f}s spoken limit — requesting shorten'
             )
             script = await _shorten_script(client, script)
 
@@ -114,7 +115,7 @@ async def _shorten_script(
 ) -> AdScript:
     """Re-calls Claude with a targeted instruction to shorten the body only."""
     shorten_msg = (
-        f'This script is too long. Shorten it to under 22 seconds by cutting '
+        f'This script is too long. Shorten it to under 18.5 seconds of spoken time by cutting '
         f'words from the body ONLY. Keep the hook, CTA, and avatar_key identical. '
         f'Return a JSON array with exactly one script object.\n\n'
         f'Script to shorten:\n{json.dumps(script.model_dump(mode="json"), indent=2, default=str)}'

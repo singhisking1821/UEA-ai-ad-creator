@@ -45,11 +45,12 @@ Retaliation: fear workplace confrontation, employee stress manager argument,
 
 ## PLACEMENT HINTS
 
-Each query must specify where in the ad timeline the clip appears:
-- 'during hook (0–4s)' — use shocking or recognizable footage that triggers instant recognition
-- 'during body line 1 (4–9s)' — reinforce the validation / 'this is illegal' moment
-- 'during body line 2 (9–15s)' — reinforce the financial promise / hope moment
-- 'before CTA (15–18s)' — transition energy — confident, forward-moving imagery
+Each query must specify where in the ad timeline the clip appears.
+B-roll is placed ONLY in the body section — never during the hook (first 3s) or CTA (last 5s).
+
+- 'body opening (4–9s)' — reinforce the validation / 'this is illegal' moment
+- 'body middle (9–14s)' — reinforce the financial promise / hope moment
+- 'body close (14–18s)' — transition energy — confident, forward-moving imagery
 
 ---
 
@@ -65,7 +66,7 @@ later by the Pexels API.
     "clip_url": "",
     "duration_seconds": 0.0,
     "description": "<one sentence: what this clip visually shows and why it fits>",
-    "placement_hint": "<one of the 4 timing positions above>"
+    "placement_hint": "<one of the 3 timing positions above>"
   }
 ]
 """

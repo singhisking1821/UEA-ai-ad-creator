@@ -1,8 +1,9 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8')
+
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_WEBHOOK_SECRET: str
     TELEGRAM_ALLOWED_CHAT_ID: int
@@ -23,9 +24,6 @@ class Settings(BaseSettings):
     BASE_URL: str
     MAX_ADS_PER_BATCH: int = 10
     MAX_VIDEO_SECONDS: int = 22
-
-    class Config:
-        env_file = '.env'
 
 
 settings = Settings()

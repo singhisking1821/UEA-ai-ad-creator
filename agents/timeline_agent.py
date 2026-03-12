@@ -36,7 +36,7 @@ async def build_shotstack_payload(
     """
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    total_duration = min(script.estimated_seconds + 3.5, float(settings.MAX_VIDEO_SECONDS))
+    total_duration = script.estimated_seconds + 3.5  # spoken time + end screen
 
     broll_lines = '\n'.join([
         f'  - search_query: "{c.search_query}" | URL: {c.clip_url} | '

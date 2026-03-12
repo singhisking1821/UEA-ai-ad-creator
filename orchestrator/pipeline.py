@@ -17,6 +17,7 @@ from config.avatars import AVATARS
 from config.settings import settings
 from models.schemas import AdOutput, AdRequest, AdScript
 from services import google_drive, google_sheets, shotstack, telegram_service
+from services.heygen import create_talking_head_video, poll_video_status
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -140,7 +141,6 @@ async def run_single_ad(script: AdScript, ad_index: int, chat_id: int) -> AdOutp
     await telegram_service.send_progress_update(
         chat_id, f'Creating HeyGen video for ad {n}...'
     )
-    from services.heygen import create_talking_head_video, poll_video_status
     video_id = await create_talking_head_video(script, avatar)
     heygen_url = await poll_video_status(video_id, timeout_seconds=600)
     logger.info(f'Ad {n}: HeyGen video ready: {heygen_url[:60]}...')

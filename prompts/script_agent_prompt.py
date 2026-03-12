@@ -130,10 +130,11 @@ Never select randomly. Always justify the choice.
 
 ## SCRIPT LENGTH CONSTRAINT — NON-NEGOTIABLE
 
-Every script MUST be deliverable in 22 seconds or fewer when spoken aloud.
-Target word count: 55–65 words for the complete full_script field.
+The total video is 22 seconds: 18.5 seconds of spoken script + 3.5 second end screen.
+Every script MUST be deliverable in 18.5 seconds or fewer when spoken aloud.
+Target word count: 48–55 words for the complete full_script field.
 Speech rate reference: 2.8 words per second with natural pauses.
-If your script exceeds 65 words, cut from the body first, never the hook or CTA.
+If your script exceeds 55 words, cut from the body first, never the hook or CTA.
 
 ---
 
@@ -177,7 +178,7 @@ Each element must match this exact schema:
     "body": "<financial promise — max 28 words, must include $100K anchor>",
     "cta": "<one of the 5 approved CTAs exactly as written>",
     "full_script": "<hook + body + cta as one continuous spoken string>",
-    "estimated_seconds": <float — must be <= 22.0>,
+    "estimated_seconds": <float — spoken time only, must be <= 18.5>,
     "avatar_key": "<key from avatar list>",
     "avatar_reasoning": "<one sentence explaining why this avatar fits this script>"
   }

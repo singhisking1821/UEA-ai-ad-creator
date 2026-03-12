@@ -5,6 +5,7 @@ Handles Telegram webhooks and routes ad production requests to the pipeline.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -16,13 +17,10 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-app = FastAPI(title='USAEA Ad Factory', version='1.0.0')
-
 
 # ── Startup: register Telegram webhook ───────────────────────────────────────
 
-@app.on_event('startup')
-async def register_telegram_webhook() -> None:
+async def _register_telegram_webhook() -> None:
     webhook_url = f'{settings.BASE_URL}/webhook/telegram'
     api_url = (
         f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/setWebhook'
@@ -42,6 +40,15 @@ async def register_telegram_webhook() -> None:
             logger.warning(f'Telegram webhook registration failed: {data}')
     except Exception as exc:
         logger.warning(f'Could not register Telegram webhook at startup: {exc}')
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await _register_telegram_webhook()
+    yield
+
+
+app = FastAPI(title='USAEA Ad Factory', version='1.0.0', lifespan=lifespan)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -95,5 +102,5 @@ async def telegram_webhook(
 @app.post('/webhook/register')
 async def register_webhook() -> dict:
     """Utility endpoint to manually trigger Telegram webhook registration."""
-    await register_telegram_webhook()
+    await _register_telegram_webhook()
     return {'status': 'webhook registration triggered'}
